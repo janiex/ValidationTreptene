@@ -1,0 +1,34 @@
+clear all
+clc
+sprintf('Accelerations_param_damp_coeff_%0.2f_to_%0.2f_iterations_%ud',x_params(1),x_params(iterations),iterations);
+file_params = fscanf(fid, ['%d' degrees 'F']);
+%--------------------------------------------------------------------------
+%-------------------------ISO 2631 Начало----------------------------------
+iso2631_input = zeros(length(signal),3);
+iso2631_input(:,1) = signal;
+iso2631_input(:,2) = signal;
+iso2631_input(:,3) = signal;
+NumberOfAxis = 3;
+type = [1 1 1];
+nos=length(iso2631_input);
+time = (nos-1)/FS;
+    %h = waitbar(0,'Моля изчакайте...','name','Обработка с тегловни филтри');
+    for ij=1:NumberOfAxis
+        %SIGNAL IS FILTERED OVER HERE
+        ISOFILTERED(:,ij) = iso2631(iso2631_input(:,ij),type(ij),FS);
+        sum=0;sum2=0;
+        for ijk=1:nos
+            sum=sum+ISOFILTERED(ijk,ij)*ISOFILTERED(ijk,ij);
+        end
+        for ijk=1:nos
+            sum2 = sum2+ISOFILTERED(ijk,ij)*ISOFILTERED(ijk,ij) ...
+        *ISOFILTERED(ijk,ij)*ISOFILTERED(ijk,ij);
+        end
+        %Изчисляване на RMS и VDV
+        rms(ij) = sqrt(sum/nos);
+        VDV(ij) = (sum2/FS).^(1/4);
+        %изчисляване на крест фактор
+        [CRESTF(ij) pos(ij)] = max(abs(ISOFILTERED(:,ij))./rms(ij));
+        %waitbar(ij/NumberOfAxis)
+    end
+

@@ -1,0 +1,300 @@
+clear all
+clc
+iterations = 12;
+pic = 1;
+[FileName,PathName] = uigetfile('*.txt','Изберете файл със записи');
+[fid,message1]=fopen([PathName FileName],'r');
+disp(message1);
+check_string = strfind(FileName,'param_damp_coeff');
+% damper coefficient file is read
+check_empty =  isempty(check_string);
+if(0 == check_empty)
+
+    %damper coefficient parametrization file is read
+    select_param = 1;
+    file_params = sscanf(FileName, 'Accelerations_param_damp_coeff_%f_to_%f_iterations_%u_v=%u.txt');   
+    %xlabel_str=['Damping coefficient in mm '];
+    
+end
+check_string1 = strfind(FileName,'param_speed');
+% damper coefficient file is read
+check_empty1 =  isempty(check_string1);
+if(0 == check_empty1)
+    %speed parametrization file is read
+    select_param = 2;
+    file_params = sscanf(FileName, ['Accelerations_param_speed_%u_to_%u_iterations_%u_m=%f.txt']);
+    
+    
+end
+if((1 == check_empty) & (1 == check_empty1))
+    return;
+end
+x_start = file_params(1);
+x_end = file_params(2);
+x_steps = file_params(3);
+x_increment = (x_end - x_start)/(x_steps-1);
+x_params = zeros(1,x_steps);
+x_params(1,1) = x_start;
+x_value = x_start;
+for counter=2:x_steps
+    x_value = x_value + x_increment;
+    x_params(1,counter) = x_value;
+end
+signal=fscanf(fid,'%f',[iterations,inf]);
+signal = signal';
+fclose(fid);
+%signal= zeros(12001,6)
+i = 1;                       %Figure counter
+% Tperiod = 60000;             %1000 for 1 second
+% FS = 100;                   %sampling freqency 
+% f = 0.4;                    %signal frequency
+% t = 0:(1/FS):Tperiod/FS; %
+% mysignal = 0.5*sin(2 * pi * f .* t);
+% 
+% signal(1:12000,1) = mysignal(1:12000);
+% 
+% h = figure(5);
+% plot(t(1:12000),signal(1:12000,1));
+% uiwait(h)
+% signal(1:12000,2) = mysignal(1:12000)';
+% signal(1:12000,3) = mysignal(1:12000)';
+% signal(1:12000,4) = mysignal(1:12000)';
+% signal(1:12000,5) = mysignal(1:12000)';
+% signal(1:12000,6) = mysignal(1:12000)';
+%----------------Избор на метод за обработка-------------------------------
+
+str = {'ISO 2631','BS 6841','Индекс на Шперлинг'};
+[selection,v] = listdlg('PromptString','Изберете стандарт за оценка:',...
+'SelectionMode','single',...
+'ListString',str,'ListSize',[200 100]);
+
+FS = 100; % Quantization frequency
+NumberOfAxis = 3;
+%--------------------------------------------------------------------------
+switch selection
+case 1
+%-------------------------IS2631 Начало----------------------------------
+
+iso2631_rms = zeros(1,iterations);
+iso2631_VDV = zeros(1,iterations);
+iso2631_MTVV = zeros(1,iterations);
+analyzed_signal = zeros(length(signal),3);
+type = [1 1 1];
+
+
+% fclose(fid);
+for itt=1:iterations
+    
+        analyzed_signal(:,1)=signal(:,itt);
+        analyzed_signal(:,2)=0;
+        analyzed_signal(:,3)=0;
+        type = [1 1 1];
+        nos=length(analyzed_signal);
+        time = (nos-1)/FS;
+        %h = waitbar(0,'Моля изчакайте...','name','Обработка с тегловни филтри');
+        for ij=1:NumberOfAxis
+            %SIGNAL IS FILTERED OVER HERE
+            ISOFILTERED(:,ij) = iso2631(analyzed_signal(:,ij),type(ij),FS);
+            sum=0;sum2=0;
+            for ijk=1:nos
+                sum=sum+ISOFILTERED(ijk,ij)*ISOFILTERED(ijk,ij);
+            end
+            for ijk=1:nos
+                sum2 = sum2+ISOFILTERED(ijk,ij)*ISOFILTERED(ijk,ij) ...
+            *ISOFILTERED(ijk,ij)*ISOFILTERED(ijk,ij);
+            end
+            %Изчисляване на RMS и VDV
+            rms(ij) = sqrt(sum/nos);
+            VDV(ij) = (sum2/FS).^(1/4);
+            %изчисляване на крест фактор
+            [CRESTF(ij) pos(ij)] = max(abs(ISOFILTERED(:,ij))./rms(ij));
+            %waitbar(ij/NumberOfAxis)
+        end
+        %close(h);
+        % Изчисляване на средно-квадратични стойности
+        string ={'Средно-квадратични стойности за X Y Z са ',' ',' ',...
+        num2str(rms')};
+        %h = msgbox(string,'RMS Стойности за XYZ','none');
+        %uiwait(h);
+        %---------------------------Оценка на комфорта-----------------------------
+        %--------------------За пътник в седнало положение-------------------------
+        k=[1 1 1];
+        RMS = rms.*k;
+        SEATPAN_A = norm(RMS(1:3));
+        TOTAL_A = norm(RMS);
+        string = {['Изчислена средно-квадратична стойност' num2str(SEATPAN_A)],' '...
+        ['Обща средно-квадратична стойност е: ' num2str(TOTAL_A)],' '};
+        %h= msgbox(string,'средно-квадратична стойност по ISO 2631','warn');
+        %uiwait(h);
+        %------------Изчисление на средноквадратична стойност----------------------
+        ISO_RMS_MV = move_rms(ISOFILTERED,1,FS);
+        for ij=1:NumberOfAxis
+            MTVV(ij)=max(ISO_RMS_MV(:,ij));
+        end
+        MTVV_RATIO = MTVV./rms;
+        VDV_RATIO = VDV./(rms*(time^0.25));
+        SEATPAN_A_MV=sqrt((k(1)*ISO_RMS_MV(:,1)).^2+(k(2)*ISO_RMS_MV(:,2)).^2 ...
+        + (k(3)*ISO_RMS_MV(:,3)).^2);
+
+        TOTAL_A_MV=sqrt(SEATPAN_A_MV.^2);
+        %--------------------------------------------------------------------------
+        %h = waitbar(0,'Моля изчакайте...','name','Времева към честотна област');
+        for ij=1:NumberOfAxis
+        [pxx(:,ij),F] = pwelch(analyzed_signal(:,ij),[],[],4096,FS);
+        [pxx_iso(:,ij),F_ISO] = pwelch(ISOFILTERED(:,ij),[],[],4096,FS);
+        %waitbar(ij/NumberOfAxis)
+        end
+      
+        iso2631_rms(1,itt) = TOTAL_A;
+        iso2631_VDV(1,itt) = VDV(1);
+        iso2631_MTVV(1,itt)=MTVV(1);
+end
+        h = figure(pic);        
+        plot(x_params,iso2631_rms);
+        grid on;
+        if(select_param == 1)
+            xlabel('Damping coefficient in m ','fontsize',9,'fontweight','b','color','black');
+            title_string = sprintf('Ride quality factor by ISO 2631 (speed V = %u m/s)',file_params(4));
+            title(title_string,'fontsize',9,'fontweight','b','color','black');
+        %speed parametrization file is read
+        elseif(2 == select_param)
+            xlabel('Speed V in m/s','fontsize',9,'fontweight','b','color','black');
+            temp_str = sprintf('Ride quality factor by ISO 2631 (damping coeff. m = %0.2f)',file_params(4));
+            title(temp_str,'fontsize',9,'fontweight','b','color','black');
+        end
+        ylabel('RMS by ISO 2631','fontsize',9,'fontweight','b','color','black');
+        
+        %damper coefficient parametrization file is read
+        
+        
+        uiwait(h);
+        pic = pic+1;
+%-----------------------------BS 6841 starts-------------------------------
+%--------------------------------------------------------------------------
+%--------------------------------------------------------------------------
+case 2
+NumberOfAxis = 3;
+bs6841_rms = zeros(1,iterations);
+bs6841_crest = zeros(1,iterations);
+bs6841_vdv = zeros(1,iterations);
+for itt=1:iterations    
+    analyzed_signal(:,1)=signal(:,itt);
+    analyzed_signal(:,2)=0;
+    analyzed_signal(:,3)=0;
+    type=[1 1 1];
+    nos=length(analyzed_signal);
+    for ij=1:NumberOfAxis
+        BSFILTERED(:,ij)=bs6841(analyzed_signal(:,ij),type(ij),FS);
+        sum=0;sum2=0;
+        for ijk=1:nos
+            sum=sum+BSFILTERED(ijk,ij)*BSFILTERED(ijk,ij);
+        end
+        for ijk=1:nos
+            sum2 = sum2+BSFILTERED(ijk,ij)*BSFILTERED(ijk,ij)* ...
+            BSFILTERED(ijk,ij)*BSFILTERED(ijk,ij);
+        end
+        % calulation of rms and fourth power vibration dose values
+        RMS_BS(ij)=sqrt(sum/nos);
+        VDV_BS(ij) = (sum2/FS).^(1/4);
+        %calculation of crest factors
+        [CRESTF_BS(ij) pos(ij)] = max(BSFILTERED(:,ij)/RMS_BS(ij));
+        
+    end
+    
+    %-----------------------comfort evaluation---------------------------------
+    k=[0.4 0.4 0.4];
+    RMS = RMS_BS.*k;
+    
+    FLOOR_A_BS = norm(RMS(1:3));
+    TOTAL_A_BS = norm(RMS);
+    bs6841_rms(1,itt) = TOTAL_A_BS
+    %---------------------power spectral density calulation--------------------
+    for ij=1:NumberOfAxis
+        [pxx_bs(:,ij),F_BS] = pwelch(BSFILTERED(:,ij),[],[],4096,FS);
+        
+    end
+   
+    %--------------------------------------------------------------------------
+    %---------------------------graph plottings--------------------------------
+    
+end
+h = figure(pic);
+plot(x_params, bs6841_rms);
+grid on;
+ylabel('RMS BS 6841','fontsize',9,'fontweight','b','color','black');
+%damper coefficient parametrization file is read
+if(select_param == 1)
+    xlabel('Damping coefficient in mm ','fontsize',9,'fontweight','b','color','black');
+    title_str = sprintf('Ride quality factor by BS 6841 (speed V = %u m/s)',file_params(4));
+    title(title_str,'fontsize',9,'fontweight','b','color','black');
+%speed parametrization file is read
+elseif(2 == select_param)
+    xlabel('Speed V in m/s','fontsize',9,'fontweight','b','color','black');
+    title_str = sprintf('Ride quality factor by BS 6841 (damping coeff. m = %0.2f)',file_params(4));
+    title(title_str,'fontsize',9,'fontweight','b','color','black');
+end
+
+
+uiwait(h);
+pic = pic+1;
+%--------------------------END OF BS STANDARD------------------------------
+%----------------------CALCULATION OF SPERLING INDEX-----------------------
+case 3
+    WZ_output = zeros(1,iterations);
+    WR_output = zeros(1,iterations);
+    fq = 100;
+    Tq = 1/fq;
+    tqer = (1:Tq:12000);
+    Asig = 0.;
+    fnew = 0.4;
+    
+
+    for itt=1:iterations
+
+        %sperling_input = signal(:,itt);
+        Asig = Asig+0.5;
+%         sperling_input = Asig*sin(2 * pi * fnew .* tqer);
+%         sperling_input = sperling_input';
+    sperling_input = signal(:,itt);
+        [WZ WR] = sperling(sperling_input,FS);
+        WZ_output(itt) = WZ(1);
+        WR_output(itt) = WR(1);
+%----------------------DEFAULT CASE ---------------------------------------
+    end
+    h = figure(pic);
+    plot(x_params, WZ_output);
+    grid on;
+    ylabel('Level of ride index comfort value (Sperling)','fontsize',9,'fontweight','b','color','black');
+    %damper coefficient parametrization file is read
+    if(select_param == 1)
+        xlabel('Damping coefficient in mm ','fontsize',9,'fontweight','b','color','black');
+        title_str = sprintf('Ride index comfort by Sperling (speed V = %u m/s)',file_params(4));
+        title(title_str,'fontsize',9,'fontweight','b','color','black');
+    %speed parametrization file is read
+    elseif(2 == select_param)
+        xlabel('Speed V in m/s');
+        title('Ride index comfort by Sperling (damping coeff. m = 0.67mm)');
+    end
+    
+    
+    
+    pic = pic+1;
+    h = figure(pic);
+    plot(x_params, WR_output);
+    grid on;
+    ylabel('Level of ride quality factor (Sperling)');
+    %damper coefficient parametrization file is read
+    if(select_param == 1)
+        xlabel('Damping coefficient in mm ');
+        title_str = sprintf('Ride quality factor by Sperling (speed V = %um/s)',file_param(4));
+    %speed parametrization file is read
+    elseif(2 == select_param)
+        xlabel('Speed V in m/s');
+        title('Ride quality factor by Sperling (damping coeff. m = 0.67mm)');
+    end
+    
+    uiwait(h);
+    pic = pic+1;
+    otherwise
+    disp('Моля изберете стандарт за обработка на данните!');
+end
